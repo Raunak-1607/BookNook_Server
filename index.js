@@ -33,9 +33,13 @@ app.get('/books', async (req, res) => {
   try {
     const cursor = books.find({});
     const allBooks = await cursor.toArray();
-    res.send(allBooks);
+
+    res.status(200).send(allBooks);
   } catch (err) {
-    res.status(500).send({ error: "Failed to fetch books", details: err.message });
+    res.status(500).send({
+      error: "Failed to fetch books",
+      details: err.message
+    });
   }
 });
 
