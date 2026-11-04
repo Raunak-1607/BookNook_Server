@@ -78,6 +78,19 @@ app.patch('/books/:id', async (req, res) => {
   }
 });
 
+app.delete('/books/:id', async(req,res)=>{
+  const {id} = req.params;
+  const query = {_id: new ObjectId(id)};
+  try{
+    const result = await books.deleteOne(query);
+    res.send(result);
+
+  }
+  catch(err){
+    res.status(500).send({ error: "Failed to delete book", details: err.message });
+  }
+})
+
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
