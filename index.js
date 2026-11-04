@@ -67,6 +67,17 @@ app.post('/books', async (req, res) => {
   }
 });
 
+app.patch('/books/:id', async (req, res) => {
+  const {id} = req.params;
+  const updatedBook = req.body;
+  try{
+    const result = await books.updateOne({ _id: new ObjectId(id) }, { $set: updatedBook });
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to update book", details: err.message });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
