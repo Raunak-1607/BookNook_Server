@@ -61,7 +61,91 @@ app.get("/books/:email", async (req, res) => {
       .send({ error: "Failed to fetch user books", details: err.message });
   }
 });
+// Active borrowed books for one user
+app.get("/borrowed-books/:email", async (req, res) => {
+  try {
+    const result = await borrowedBooks
+      .find({
+        email: req.params.email,
+        status: "Borrowed",
+      })
+      .toArray();
 
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({
+      error: "Failed to fetch borrowed books",
+      details: err.message,
+    });
+  }
+});
+
+// Return exactly one borrowed book and restore exactly one copy
+app.patch("/borrowed-books/:id/return", async (req, res) => {
+  try {
+    const { email } = req.body;
+    const borrowId = new ObjectId(req.params.id);
+
+    const borrowedBook = await borrowedBooks.findOne({
+      _id: borrowId,
+      email,
+      status: "Borrowed",
+    });
+
+    if (!borrowedBook) {
+      return res.status(404).send({
+        error: "Active borrowed book not found.",
+      });
+    }
+
+    const returnUpdate = await borrowedBooks.updateOne(
+      {
+        _id: borrowId,
+        email,
+        status: "Borrowed",
+      },
+      {
+        $set: {
+          status: "Returned",
+          returnDate: new Date(),
+        },
+      },
+    );
+
+    if (returnUpdate.modifiedCount === 0) {
+      return res.status(409).send({
+        error: "This book has already been returned.",
+      });
+    }
+
+    const bookUpdate = await books.updateOne(
+      { _id: borrowedBook.bookId },
+      { $inc: { copies: 1 } },
+    );
+
+    if (bookUpdate.modifiedCount === 0) {
+      // Restore the borrow status if its book document no longer exists.
+      await borrowedBooks.updateOne(
+        { _id: borrowId },
+        { $set: { status: "Borrowed" }, $unset: { returnDate: "" } },
+      );
+
+      return res.status(404).send({
+        error: "Original book was not found.",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Book returned successfully.",
+    });
+  } catch (err) {
+    res.status(500).send({
+      error: "Failed to return book",
+      details: err.message,
+    });
+  }
+});
 // Add a book
 app.post("/books", async (req, res) => {
   try {
@@ -84,10 +168,21 @@ app.post("/books", async (req, res) => {
   }
 });
 
-
 app.post("/borrowed-books", async (req, res) => {
   try {
     const { bookId, userName, email } = req.body;
+
+    const existingBorrow = await borrowedBooks.findOne({
+      bookId: new ObjectId(bookId),
+      email,
+      status: "Borrowed",
+    });
+
+    if (existingBorrow) {
+      return res.status(409).send({
+        error: "You have already borrowed this book.",
+      });
+    }
 
     const updatedBook = await books.findOneAndUpdate(
       {
