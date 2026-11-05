@@ -53,8 +53,8 @@ app.get("/", (req, res) => {
   res.send("Hello World!");
 });
 
-// All books
-app.get("/books", verifyToken, async (req, res) => {
+// All books (public)
+app.get("/books", async (req, res) => {
   try {
     const allBooks = await books.find({}).toArray();
     res.status(200).send(allBooks);
@@ -66,9 +66,13 @@ app.get("/books", verifyToken, async (req, res) => {
 });
 
 
-app.get("/books/detail/:id", verifyToken, async (req, res) => {
+// Single book by ID (public)
+app.get("/books/detail/:id", async (req, res) => {
   try {
     const result = await books.findOne({ _id: new ObjectId(req.params.id) });
+    if (!result) {
+      return res.status(404).send({ error: "Book not found" });
+    }
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: "Invalid ID", details: err.message });
