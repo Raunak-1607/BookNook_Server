@@ -2,7 +2,7 @@ import express from "express";
 import { MongoClient, ObjectId } from "mongodb";
 import cors from "cors";
 import "dotenv/config";
-import { jwtVerify, createRemoteJWKSet } from 'jose'
+import { jwtVerify, createRemoteJWKSet, createLocalJWKSet } from 'jose'
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -14,30 +14,58 @@ const client = new MongoClient(process.env.MONGO_URL);
 const db = client.db("BookNook");
 const books = db.collection("books");
 const borrowedBooks = db.collection("borrowbooks");
+const jwksCollection = db.collection("jwks");
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  // console.log("Authorization Header:", authHeader);
   if (!authHeader) {
     return res.status(401).send({ error: "No token provided" });
   }
 
   const token = authHeader.split(" ")[1];
-  // console.log("Token:", token);
-  const JWKS = createRemoteJWKSet( new URL(`${process.env.CLIENT_URL}/api/auth/jwks`))
-  
-  try{
-
-    const {payload} = await jwtVerify(token, JWKS)
-    next()
+  if (!token) {
+    return res.status(401).send({ error: "No token provided" });
   }
-  catch(err){
+
+  const clientUrl = process.env.CLIENT_URL ? process.env.CLIENT_URL.trim() : "";
+
+  // 1. If CLIENT_URL is a public web URL (not localhost), try remote JWKS
+  if (clientUrl && !clientUrl.includes("localhost") && !clientUrl.includes("127.0.0.1")) {
+    try {
+      const JWKS = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
+      const { payload } = await jwtVerify(token, JWKS);
+      req.user = payload;
+      return next();
+    } catch (remoteErr) {
+      console.warn("Remote JWKS failed, trying database keys:", remoteErr.message);
+    }
+  }
+
+  // 2. Database fallback: directly verify with JWKS public keys in shared MongoDB
+  try {
+    const dbKeys = await jwksCollection.find({}).toArray();
+    if (dbKeys.length > 0) {
+      const formattedKeys = dbKeys.map((k) => {
+        const parsed = typeof k.publicKey === "string" ? JSON.parse(k.publicKey) : k.publicKey;
+        return {
+          ...parsed,
+          kid: k._id.toString(),
+          alg: k.alg || "EdDSA",
+          crv: k.crv || "Ed25519",
+        };
+      });
+      const localJWKS = createLocalJWKSet({ keys: formattedKeys });
+      const { payload } = await jwtVerify(token, localJWKS);
+      req.user = payload;
+      return next();
+    }
+
+    throw new Error("No JWKS keys found in database");
+  } catch (err) {
     console.error("JWT verification error:", err);
     return res.status(403).send({ error: "Invalid token" });
   }
-  // console.log("Decoded Payload:", payload);
-  
-}
+};
 
 async function run() {
   try {
@@ -284,6 +312,10 @@ app.delete("/books/:id", verifyToken, async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`Example app listening on port ${port}`);
+  });
+}
+
+export default app;
